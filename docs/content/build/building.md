@@ -4,7 +4,21 @@ title: "构建与部署"
 
 # 构建与部署
 
-本页固件与应用命令在 `SiFli-EPD-Platform` 平台源码根目录的 PowerShell 中执行，该目录包含 `src/`、`project/`、`modules/` 和 `SiFli-SDK/`。当前平台构建使用 `sf32lb57-epd-gyd7n6_hcpu`，硬件配置位于项目板级目录（源码：`boards/sf32lb57-epd-gyd7n6/`）。送审中的 SDK 独立板型不参与当前平台构建，两者的用途见[两套板级目录](../contributing/sdk-board.md#两套板级目录)。
+在 `SiFli-EPD-Platform` 源码根目录构建，目录包含 `src/`、`project/`、`modules/` 和 `SiFli-SDK/`。macOS 用下面的 `just` 入口，PowerShell 步骤用于 Windows。构建目标是 `sf32lb57-epd-gyd7n6_hcpu`，硬件配置来自 `boards/sf32lb57-epd-gyd7n6/`。[板级说明](../contributing/sdk-board.md#两套板级目录)
+
+## macOS
+
+需要 Git、`uv`、`just` 和 Apple Command Line Tools。首次运行 `just setup` 初始化固定 SDK 及递归子模块，安装 SDK 锁定的工具，并准备本地 Conan 组件。
+
+```sh
+just setup
+just build
+just apps hello,netdemo,cfgdemo
+```
+
+`just build` 将后续参数传给 SCons。例如 `just build APPS=hello,netdemo,cfgdemo PREINSTALL=hello` 同时生成三个应用包，并将 `hello` 放入 `fs_root.bin`。构建目录、板型和镜像布局沿用下面的固件与应用说明。
+
+macOS 使用配套 SDK 的 `ezip_mac` 转换 EZIP，并用本机 `cc` 和同一 SDK 的 LittleFS 源码生成 NOR 镜像。构建入口在 `tools/build_posix.sh`，文件系统镜像由 `tools/lfs_image.py` 调度。
 
 ## 开发工具与执行目录
 
@@ -42,7 +56,7 @@ scons -C project --board=sf32lb57-epd-gyd7n6_hcpu --board_search_path=../boards 
 
 输出位于 `project/build_sf32lb57-epd-gyd7n6_hcpu/`，包括主固件、配套 ACPU 和启动镜像、公共资源、`fs_root.bin` 及下载脚本。下载脚本同时引用源码中的 `src/boards/epd_e0470a03_57x/waveform/epd_waveform.bin`。默认不编译应用；平台构建不需要单词词库、Node.js 或 `sharp`。
 
-文件系统镜像由 SDK 的 `tools/mklfsimg/mklfsimg.exe` 生成，使用可选的 `disk/` 初始内容；`disk/` 不存在时从空文件系统开始，再叠加 `PREINSTALL` 应用。普通下载清单不包含 `fs_root.bin`。
+文件系统镜像使用可选的 `disk/` 初始内容，从空目录或该内容开始，再叠加 `PREINSTALL` 应用。Windows 使用 SDK 的 `tools/mklfsimg/mklfsimg.exe`。`STORAGE_IMAGE=1` 或 `STORAGE_IMPORT` 会将 `fs_root.bin` 加入下载清单。
 
 ## 构建应用包
 
@@ -112,7 +126,7 @@ scons -C project --board=sf32lb57-epd-gyd7n6_hcpu --board_search_path=../boards 
 
 运行 `project\build_sf32lb57-epd-gyd7n6_hcpu\uart_download.bat` 烧录。`STORAGE_IMAGE=1` 或 `STORAGE_IMPORT=<备份绝对目录>` 会将文件系统镜像加入下载清单，烧录后覆盖内部文件系统。备份导入格式见下节。初始化后重新构建时省略这两项，恢复保留用户数据的普通下载清单。
 
-SDK 制镜工具使用 Windows 系统 ANSI 编码处理文件名。非 UTF-8 环境中的非 ASCII 文件名可能无法生成设备所需的 UTF-8 路径，构建会报错；可使用英文预置文件名，文件正文仍可包含中文。
+Windows 的 SDK 制镜工具使用系统 ANSI 编码处理文件名。编码与设备 UTF-8 路径不一致时构建会报错。预置文件名可用 ASCII，文件正文可包含中文。
 
 ## 导入已有文件系统备份
 

@@ -111,7 +111,20 @@ HCPU 运行界面和平台服务；计算组件可通过统一接口把支持的
 
 ## 编译
 
-### 准备环境
+### macOS
+
+安装 Git、`uv`、`just` 和 Apple Command Line Tools。在项目根目录执行以下命令。
+
+```sh
+just setup
+just build
+just apps hello,netdemo,cfgdemo
+```
+
+构建产物仍在 `project/build_sf32lb57-epd-gyd7n6_hcpu/`。
+带预装应用的镜像可用 `just build PREINSTALL=hello`。详见[构建指南](docs/content/build/building.md#macos)。
+
+### Windows 准备环境
 
 当前资源转换和文件系统镜像工具使用 Windows 可执行程序。以下命令在 Windows PowerShell 中执行，需要先安装 Git 和 `uv`。进入仓库后，构建和烧录命令均从仓库根目录运行。
 

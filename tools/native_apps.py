@@ -155,7 +155,8 @@ def add_package(env, sdk, repo, app_id, inputs, rgb565=True, palette=None, resou
     module = module_dir / ('output/' + app_id + '.so')
     library_projects = [(module_dir / directory, name) for directory, name in (libraries or ())]
     library_modules = [directory / ('output/' + name + '.so') for directory, name in library_projects]
-    tool = sdk / 'tools/png2ezip/ezip.exe'
+    ezip = {'win32': 'ezip.exe', 'darwin': 'ezip_mac', 'linux': 'ezip_linux'}[sys.platform]
+    tool = sdk / 'tools/png2ezip' / ezip
     flags = ['-rgb565' if rgb565 else '-rgb888', '-lvgl_version', '9',
              '-binfile', '2', '-binext', '.ezip', '-dpt', '1', '-chip', 'sf57x']
     if palette is not None:

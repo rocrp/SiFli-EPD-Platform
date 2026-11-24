@@ -1,4 +1,4 @@
-"""Build the NOR image using the matching SDK's mklfsimg executable."""
+"""Build the NOR image using the matching SDK's LittleFS implementation."""
 import hashlib
 import json
 import os
@@ -32,27 +32,52 @@ def verify_import(directory):
 def build_image(directory, target, tool, ptab):
     directory, target = Path(directory).resolve(), Path(target).resolve()
     _, size = flash_region(ptab, 'fs_root')
-    # This SDK's Windows tool uses the first '/' as the image-relative path.
-    # Pass a backslash-only absolute source directory (never a POSIX/relative path).
-    if os.name != 'nt':
-        raise RuntimeError('The current SDK image tool requires Windows')
     if not directory.is_dir():
         raise ValueError('Missing image source directory: ' + str(directory))
     for file in directory.rglob('*'):
         if file.is_symlink():
             raise ValueError('Image source must not contain symlinks: ' + str(file))
-        name = file.relative_to(directory).as_posix()
-        # The SDK executable stores FindFirstFileA names without transcoding.
-        if name.encode('mbcs', errors='replace') != name.encode('utf-8'):
-            raise ValueError('SDK mklfsimg uses Windows ANSI filenames, which differ from device UTF-8: ' +
-                             name + '; use ASCII image filenames or a UTF-8 Windows system locale')
-        if len(str(file).encode('utf-8')) >= 256:
-            raise ValueError('SDK image tool path exceeds 255 bytes: ' + str(file))
+        if os.name == 'nt':
+            name = file.relative_to(directory).as_posix()
+            # The SDK executable stores FindFirstFileA names without transcoding.
+            if name.encode('mbcs', errors='replace') != name.encode('utf-8'):
+                raise ValueError('SDK mklfsimg uses Windows ANSI filenames, which differ from device UTF-8: ' +
+                                 name + '; use ASCII image filenames or a UTF-8 Windows system locale')
+            if len(str(file).encode('utf-8')) >= 256:
+                raise ValueError('SDK image tool path exceeds 255 bytes: ' + str(file))
     target.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([str(tool), '-c', str(directory), '-b', '4096', '-r', '32', '-p', '256',
-                    '-s', str(size), '-i', str(target)], check=True)
-    if target.stat().st_size != size or b'littlefs' not in target.read_bytes()[:8192]:
-        raise ValueError('Invalid LittleFS image output')
+    with tempfile.TemporaryDirectory(prefix='lfs-img-', dir=target.parent) as output:
+        image = Path(output) / target.name
+        if os.name == 'nt':
+            # mklfsimg treats the first '/' in the absolute source as the relative path.
+            arguments = ['-c', str(directory), '-b', '4096', '-r', '32', '-p', '256',
+                         '-s', str(size), '-i', str(image)]
+        else:
+            arguments = [str(directory), str(image), str(size)]
+        subprocess.run([str(tool), *arguments], check=True)
+        with image.open('rb') as stream:
+            if image.stat().st_size != size or b'littlefs' not in stream.read(8192):
+                raise ValueError('Invalid LittleFS image output')
+        image.replace(target)
+
+
+def image_tool(env, sdk):
+    if os.name == 'nt':
+        return env.File(str(Path(sdk) / 'tools/mklfsimg/mklfsimg.exe'))
+
+    from SCons.Script import Action
+    littlefs = Path(sdk) / 'rtos/rtthread/components/dfs/filesystems/littlefs'
+    sources = [Path(__file__).with_name('mklfs_host.c'), littlefs / 'lfs.c', littlefs / 'lfs_util.c']
+    headers = [littlefs / 'lfs.h', littlefs / 'lfs_util.h']
+
+    def compile_host_tool(target, source, env):
+        subprocess.run(['cc', '-std=gnu11', '-O2', '-I', str(littlefs), '-o', str(target[0]),
+                        *(str(path) for path in sources)], check=True)
+        return 0
+
+    return env.Command(str(Path(env['build_dir']) / 'mklfsimg-host'),
+                       [str(path) for path in sources + headers],
+                       Action(compile_host_tool, 'CC host $TARGET'))[0]
 
 
 def add_image(env, sdk, migration=None, packages=()):
@@ -60,7 +85,7 @@ def add_image(env, sdk, migration=None, packages=()):
     directory = verify_import(migration) if migration else Path('../disk').resolve()
     ptab = env['PARTITION_TABLE']
     target = str(Path(env['build_dir']) / 'fs_root.bin')
-    tool = Path(sdk).resolve() / 'tools/mklfsimg/mklfsimg.exe'
+    tool = image_tool(env, Path(sdk).resolve())
     files = sorted(p for p in directory.rglob('*') if p.is_file())
 
     def action(target, source, env):
@@ -75,11 +100,10 @@ def add_image(env, sdk, migration=None, packages=()):
                 destination = staging / 'apps' / package.name
                 if not destination.exists():
                     shutil.copytree(package, destination)
-            build_image(staging, str(target[0]), tool, ptab)
+            build_image(staging, str(target[0]), tool.abspath, ptab)
         return 0
 
-    dependencies = [str(p) for p in files] + [str(ptab), __file__,
-                    str(tool),
+    dependencies = [str(p) for p in files] + [str(ptab), __file__, tool,
                     Value(str(directory) + '\n' + '\n'.join(str(p) for p in files)),
                     Value([package.name for package, nodes in packages])]
     if migration:
